@@ -12,16 +12,34 @@ and produces:
 This turns "I'm not sure if it can tell a car from a shadow" into actual
 evidence instead of a guess.
 
+On first run this creates/uses a local .venv and installs everything needed
+automatically -- including requirements-yolo.txt (PyTorch + ultralytics),
+since without it there's no real detector to check. That download is a few
+hundred MB to ~2GB depending on platform and takes a few minutes.
+
 Usage:
-    python scripts/check_detection_quality.py path/to/video.mp4
-    python scripts/check_detection_quality.py rtsp://user:pass@host/stream --frames 60
-    python scripts/check_detection_quality.py 0 --frames 30      # webcam
+    python3 scripts/check_detection_quality.py path/to/video.mp4
+    python3 scripts/check_detection_quality.py rtsp://user:pass@host/stream --frames 60
+    python3 scripts/check_detection_quality.py 0 --frames 30      # webcam
 """
-import argparse
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from scripts._bootstrap import ensure_deps_and_reexec  # noqa: E402
+
+if __name__ == "__main__":
+    os.chdir(ROOT)
+    ensure_deps_and_reexec(
+        script_file=__file__,
+        probe_modules=["cv2", "numpy", "ultralytics"],
+        requirement_files=["requirements.txt", "requirements-yolo.txt"],
+        bootstrap_env_var="PARKINGGO_CHECK_BOOTSTRAPPED",
+    )
+
+import argparse
 
 import cv2
 import numpy as np
