@@ -35,16 +35,38 @@ app, no public users, no license plate recognition.
 
 ## Quickstart
 
-Requires Python 3.10+.
+Requires Python 3.10+. No manual pip setup needed:
 
 ```bash
-pip install -r requirements.txt
-
-# Optional but recommended — real car detection with YOLOv8 (downloads PyTorch):
-pip install -r requirements-yolo.txt
-
-python run.py            # http://127.0.0.1:8000  (default login: admin / admin)
+git clone -b claude/parkinggo-app-concept-09ou7c https://github.com/blaze1235/ParkingGO.git
+cd ParkingGO
+python3 run.py           # http://127.0.0.1:8000  (default login: admin / admin)
 ```
+
+On first run, `run.py` creates a local virtual environment in `.venv` and
+installs the dependencies into it automatically — this is the supported path
+on macOS (Homebrew) and Debian/Ubuntu, whose system Python blocks `pip
+install` with an `externally-managed-environment` error (PEP 668).
+
+Optional but recommended — real car detection with YOLOv8 (downloads PyTorch,
+~2 GB; without it a simple mock detector is used):
+
+```bash
+.venv/bin/pip install -r requirements-yolo.txt   # macOS/Linux
+# .venv\Scripts\pip install -r requirements-yolo.txt   (Windows)
+python3 run.py
+```
+
+<details>
+<summary>Prefer managing the environment yourself?</summary>
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python run.py
+```
+</details>
 
 Then in the web app:
 
