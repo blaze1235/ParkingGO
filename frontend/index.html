@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParkingGo — Street Parking Monitor</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2322a862'/><text x='50' y='72' font-size='62' font-family='sans-serif' font-weight='bold' text-anchor='middle' fill='white'>P</text></svg>">
+</head>
+<body>
+  <header id="topbar" class="hidden">
+    <div class="brand"><span class="brand-badge">P</span> ParkingGo</div>
+    <nav>
+      <a href="#/" data-nav="dashboard">Dashboard</a>
+      <a href="#/cameras" data-nav="cameras">Cameras</a>
+    </nav>
+    <div class="topbar-right">
+      <span id="detector-badge" class="badge" title="Active detection backend"></span>
+      <button id="logout-btn" class="btn btn-ghost">Log out</button>
+    </div>
+  </header>
+  <main id="view"></main>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/illustration.js"></script>
+  <script src="/static/js/chart.js"></script>
+  <script src="/static/js/calibration.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

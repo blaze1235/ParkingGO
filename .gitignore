@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ParkingGo runtime data (database, uploaded videos, model weights)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.pt
+*.onnx
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

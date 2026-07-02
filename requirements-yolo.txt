@@ -1,0 +1,3 @@
+# Optional: real vehicle detection with YOLOv8 (pulls in PyTorch, ~2 GB).
+# The yolov8n.pt weights are downloaded automatically on first run.
+ultralytics>=8.2

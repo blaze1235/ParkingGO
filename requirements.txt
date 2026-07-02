@@ -1,0 +1,7 @@
+# Core dependencies (runs with the mock detector out of the box).
+# For real car detection also install requirements-yolo.txt.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+opencv-python-headless>=4.9
+numpy>=1.26
+python-multipart>=0.0.9
