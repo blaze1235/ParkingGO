@@ -44,6 +44,16 @@ SAMPLE_INTERVAL = float(os.environ.get("PARKINGGO_SAMPLE_INTERVAL", 60))
 
 MAX_UPLOAD_BYTES = int(os.environ.get("PARKINGGO_MAX_UPLOAD_MB", 500)) * 1024 * 1024
 
+# Mock-detector shadow rejection (dev/test only — YOLO doesn't need this, it
+# distinguishes cars from shadows via learned features, not thresholding). A
+# dark blob only counts as a vehicle if it has enough internal edges (window
+# seams, mirrors, panel lines) *and* enough texture variance; smooth,
+# low-detail dark regions are treated as shadows/glare and ignored. Combined
+# as edge_density*3 + texture_std/100, calibrated against the bundled demo
+# video (real cars score ~0.82, a cast shadow across an empty bay tops out
+# around 0.35 — the default sits at the midpoint with margin on both sides).
+MOCK_SHADOW_SCORE_MIN = float(os.environ.get("PARKINGGO_MOCK_SHADOW_SCORE_MIN", 0.55))
+
 
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

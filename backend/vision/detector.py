@@ -61,7 +61,22 @@ class YoloDetector(BaseDetector):
 
 
 class MockDetector(BaseDetector):
-    """Detects car-sized dark blobs on a light background (demo video)."""
+    """Detects car-sized dark blobs on a light background (demo video).
+
+    This is a coarse, dependency-free stand-in for testing without YOLO — it
+    has no learned features, so it cannot recognize a car by shape. To avoid
+    flagging shadows/glare as vehicles, every dark blob candidate is screened
+    with two classic shadow-rejection heuristics before being reported:
+
+    - Edge density: real cars have panel seams, windows, mirrors, wheels —
+      shadows are smooth gradients with almost no internal edges.
+    - Texture (intensity) variance: catches soft-edged shadows that Canny
+      misses, since shadow interiors are much flatter than a car's body.
+
+    For real footage, install requirements-yolo.txt: YOLO distinguishes cars
+    from shadows via learned visual features, not thresholding, and doesn't
+    need this filter.
+    """
     name = "mock"
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
@@ -70,6 +85,8 @@ class MockDetector(BaseDetector):
         _, mask = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        edges = cv2.Canny(gray, 40, 120)
+
         detections: list[Detection] = []
         min_area, max_area = (w * h) * 0.002, (w * h) * 0.25
         for contour in contours:
@@ -77,9 +94,20 @@ class MockDetector(BaseDetector):
             area = cw * ch
             if not (min_area <= area <= max_area):
                 continue
+
+            roi_gray = gray[y:y + ch, x:x + cw]
+            roi_edges = edges[y:y + ch, x:x + cw]
+            edge_density = float(np.count_nonzero(roi_edges)) / roi_edges.size
+            texture_std = float(roi_gray.std())
+            structure_score = edge_density * 3 + texture_std / 100
+            if structure_score < config.MOCK_SHADOW_SCORE_MIN:
+                continue  # smooth, low-detail dark region -> likely a shadow, not a vehicle
+
+            # More internal structure -> higher confidence it's really a vehicle.
+            confidence = min(0.95, 0.5 + structure_score - config.MOCK_SHADOW_SCORE_MIN)
             detections.append(Detection(
                 box=(float(x), float(y), float(x + cw), float(y + ch)),
-                confidence=0.9,
+                confidence=confidence,
                 label="vehicle",
             ))
         return detections

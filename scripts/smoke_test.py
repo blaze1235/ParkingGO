@@ -84,7 +84,19 @@ def main() -> None:
     check("Spot 3 detected free", by_name.get("Spot 3") == "free")
     check("counts add up", status["free"] + status["occupied"] + status["unknown"] == 4)
 
-    print("4. Media endpoints")
+    print("4. Shadow rejection (Spot 3 gets a cast shadow mid-clip, no car)")
+    shadow_deadline = time.time() + 65  # one full loop of the 60s demo clip
+    saw_occupied = False
+    while time.time() < shadow_deadline:
+        s = call("GET", f"/api/cameras/{cam_id}/status")
+        spot3 = next(z for z in s["zones"] if z["name"] == "Spot 3")
+        if spot3["status"] == "occupied":
+            saw_occupied = True
+            break
+        time.sleep(2)
+    check("Spot 3 never misread as occupied during shadow window", not saw_occupied)
+
+    print("5. Media endpoints")
     jpeg = call("GET", f"/api/cameras/{cam_id}/snapshot?overlay=1", raw=True)
     check("snapshot is JPEG", jpeg[:2] == b"\xff\xd8", f"{len(jpeg)} bytes")
 
@@ -95,13 +107,13 @@ def main() -> None:
     check("MJPEG stream serves frames",
           "multipart/x-mixed-replace" in ctype and b"\xff\xd8" in chunk)
 
-    print("5. History & stats")
+    print("6. History & stats")
     events = call("GET", f"/api/cameras/{cam_id}/history")
     check("status events recorded", len(events) >= 4, f"{len(events)} events")
     stats = call("GET", f"/api/cameras/{cam_id}/stats")
     check("stats endpoint responds", "hourly" in stats)
 
-    print("6. Cleanup")
+    print("7. Cleanup")
     call("DELETE", f"/api/cameras/{cam_id}")
     check("camera deleted", all(c["id"] != cam_id for c in call("GET", "/api/cameras")))
 
