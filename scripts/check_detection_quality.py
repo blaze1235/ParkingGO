@@ -56,10 +56,20 @@ def main() -> None:
     parser.add_argument("--out", default="data/detection_check.mp4", help="annotated output video path")
     args = parser.parse_args()
 
-    source = int(args.source) if args.source.isdigit() and len(args.source) <= 2 else args.source
+    is_webcam = args.source.isdigit() and len(args.source) <= 2
+    is_url = "://" in args.source
+    if is_webcam:
+        source = int(args.source)
+    elif is_url:
+        source = args.source
+    else:
+        # Expand ~ ourselves: a quoted "~/..." arg reaches us literally,
+        # since the shell only expands ~ when it's unquoted.
+        source = str(Path(args.source).expanduser())
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        sys.exit(f"Could not open source: {args.source}")
+        sys.exit(f"Could not open source: {source}"
+                 + (f"  (from argument: {args.source})" if str(source) != args.source else ""))
 
     detector = create_detector()
     print(f"Detector backend: {detector.name}")
