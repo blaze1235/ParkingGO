@@ -74,3 +74,31 @@ def box_zone_overlap_ratio(box: Sequence[float], zone: Polygon) -> float:
         return 0.0
     inter = polygon_area(clip_polygon_to_rect(zone, x1, y1, x2, y2))
     return inter / denom
+
+
+def point_in_polygon(point: Point, poly: Polygon) -> bool:
+    """Standard ray-casting point-in-polygon test."""
+    x, y = point[0], point[1]
+    n = len(poly)
+    inside = False
+    x1, y1 = poly[-1][0], poly[-1][1]
+    for i in range(n):
+        x2, y2 = poly[i][0], poly[i][1]
+        if (y1 > y) != (y2 > y):
+            x_at_y = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < x_at_y:
+                inside = not inside
+        x1, y1 = x2, y2
+    return inside
+
+
+def box_center_in_zone(box: Sequence[float], zone: Polygon) -> bool:
+    """Whether a detection box's center point falls inside the zone polygon.
+
+    Far more resistant to adjacent-stall bleed than area overlap in a dense
+    lot: a neighboring car's box can spill 25%+ into the next zone over
+    (especially with a cast shadow widening the box on one side), but its
+    center point can only ever land in one stall.
+    """
+    x1, y1, x2, y2 = box[:4]
+    return point_in_polygon(((x1 + x2) / 2, (y1 + y2) / 2), zone)

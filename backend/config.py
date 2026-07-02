@@ -24,9 +24,13 @@ STREAM_FPS = float(os.environ.get("PARKINGGO_STREAM_FPS", 8))
 JPEG_QUALITY = int(os.environ.get("PARKINGGO_JPEG_QUALITY", 80))
 
 # Occupancy logic tuning.
-# A zone counts as occupied when a vehicle detection overlaps it by at least
-# this fraction of min(zone area, vehicle box area).
-OVERLAP_THRESHOLD = float(os.environ.get("PARKINGGO_OVERLAP_THRESHOLD", 0.25))
+# A vehicle counts as "in" a zone primarily when its detection box CENTER
+# falls inside the zone polygon (robust in dense lots — a neighboring car's
+# box, especially one widened by a cast shadow, can spill into the next
+# stall, but its center can't). OVERLAP_THRESHOLD is only a fallback for
+# boxes clipped at the frame edge, so it's set high: only near-full
+# containment should count without center confirmation.
+OVERLAP_THRESHOLD = float(os.environ.get("PARKINGGO_OVERLAP_THRESHOLD", 0.6))
 # Detections at or above CONF_OCCUPIED are trusted; detections between
 # CONF_UNKNOWN and CONF_OCCUPIED make an overlapping zone "unknown".
 CONF_OCCUPIED = float(os.environ.get("PARKINGGO_CONF_OCCUPIED", 0.45))

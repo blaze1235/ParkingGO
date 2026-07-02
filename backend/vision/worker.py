@@ -16,7 +16,7 @@ import numpy as np
 from .. import config, db
 from .annotate import annotate_frame
 from .detector import BaseDetector
-from .geometry import box_zone_overlap_ratio
+from .geometry import box_center_in_zone, box_zone_overlap_ratio
 
 log = logging.getLogger("parkinggo.worker")
 
@@ -181,10 +181,21 @@ class CameraWorker:
 
     @staticmethod
     def _classify_zone(zone: dict, detections: list) -> str:
+        """A vehicle counts as "in" a zone if its detection box center falls
+        inside the zone polygon, or (fallback, for boxes clipped at the
+        frame edge) if it has very heavy area overlap. Center-in-zone is the
+        primary signal because in a dense lot a neighboring car's box often
+        spills 25%+ into the next stall over — especially with a cast shadow
+        widening the box on one side — which used to falsely mark the empty
+        neighboring zone as occupied.
+        """
         best_conf = 0.0
         for det in detections:
-            overlap = box_zone_overlap_ratio(det.box, zone["polygon"])
-            if overlap >= config.OVERLAP_THRESHOLD:
+            in_zone = box_center_in_zone(det.box, zone["polygon"])
+            if not in_zone:
+                overlap = box_zone_overlap_ratio(det.box, zone["polygon"])
+                in_zone = overlap >= config.OVERLAP_THRESHOLD
+            if in_zone:
                 best_conf = max(best_conf, det.confidence)
         if best_conf >= config.CONF_OCCUPIED:
             return "occupied"
