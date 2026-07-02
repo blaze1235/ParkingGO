@@ -15,7 +15,11 @@ SESSION_TTL_SECONDS = int(os.environ.get("PARKINGGO_SESSION_TTL", 12 * 3600))
 
 # Detection backend: "auto" (YOLO if installed, else mock), "yolo", "mock"
 DETECTOR_BACKEND = os.environ.get("PARKINGGO_DETECTOR", "auto").lower()
-YOLO_MODEL = os.environ.get("PARKINGGO_YOLO_MODEL", "yolov8n.pt")
+# yolov8s: meaningfully more accurate than the nano (yolov8n) default used
+# during early development, still fast enough for our ~1 Hz detection
+# cadence per camera. For higher accuracy at more compute cost, set
+# PARKINGGO_YOLO_MODEL=yolov8m.pt or yolov8l.pt.
+YOLO_MODEL = os.environ.get("PARKINGGO_YOLO_MODEL", "yolov8s.pt")
 
 # How often (seconds) each camera runs detection on its latest frame.
 DETECT_INTERVAL = float(os.environ.get("PARKINGGO_DETECT_INTERVAL", 1.0))

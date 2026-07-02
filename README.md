@@ -92,6 +92,27 @@ An end-to-end API smoke test is included (run it while the server is up):
 python scripts/smoke_test.py
 ```
 
+Pure-logic unit tests (no server/video needed, runs in under a second):
+
+```bash
+python scripts/test_occupancy_logic.py
+```
+
+### Checking real detection quality
+
+Don't guess whether YOLO can actually tell your footage's cars apart from
+shadows/clutter — measure it. This runs the active detector against a real
+video/RTSP/webcam source and writes an annotated output video plus
+confidence stats:
+
+```bash
+python scripts/check_detection_quality.py path/to/your_footage.mp4
+# or: rtsp://user:pass@host/stream   or:  0  (webcam)
+```
+
+Watch `data/detection_check.mp4` afterward and check: are real cars boxed?
+Anything missed? Any false boxes on shadows or pavement markings?
+
 ## Configuration
 
 Everything is tuned via environment variables (defaults in `backend/config.py`):
@@ -100,9 +121,9 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 |---|---|---|
 | `PARKINGGO_ADMIN_USERNAME` / `PARKINGGO_ADMIN_PASSWORD` | `admin` / `admin` | Dashboard login |
 | `PARKINGGO_DETECTOR` | `auto` | `auto` (YOLO if installed, else mock), `yolo`, or `mock` |
-| `PARKINGGO_YOLO_MODEL` | `yolov8n.pt` | Any ultralytics model (`yolov8s.pt` is more accurate, slower) |
+| `PARKINGGO_YOLO_MODEL` | `yolov8s.pt` | Any ultralytics model (`yolov8m.pt`/`yolov8l.pt` are more accurate, slower) |
 | `PARKINGGO_DETECT_INTERVAL` | `1.0` | Seconds between detection runs per camera |
-| `PARKINGGO_OVERLAP_THRESHOLD` | `0.25` | Vehicle/zone overlap ratio that counts as occupied |
+| `PARKINGGO_OVERLAP_THRESHOLD` | `0.6` | Fallback-only: box/zone overlap ratio that counts as occupied when the box's center falls outside every zone (e.g. clipped at the frame edge) |
 | `PARKINGGO_CONF_OCCUPIED` / `PARKINGGO_CONF_UNKNOWN` | `0.45` / `0.25` | Confidence bands: above → occupied, between → unknown |
 | `PARKINGGO_MIN_BRIGHTNESS` | `25` | Mean frame brightness (0–255) below which zones go unknown |
 | `PARKINGGO_STABLE_TICKS` | `3` | Consecutive identical readings required before a status commits |
@@ -113,9 +134,12 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 
 1. Each camera runs a capture thread (only the newest frame is kept, so RTSP
    never lags) and a detection thread on a fixed interval.
-2. Vehicle detections are intersected with every zone polygon
-   (Sutherland–Hodgman clipping); overlap ≥ threshold means a vehicle is in
-   the zone.
+2. A vehicle counts as "in" a zone primarily when its detection box's center
+   point falls inside the zone polygon — robust in dense lots, where a
+   neighboring car's box (especially one widened by a cast shadow) can
+   overlap the next stall without its center ever leaving its own stall.
+   Heavy area overlap (Sutherland–Hodgman polygon clipping) is used only as
+   a fallback for boxes clipped at the frame edge.
 3. Detection confidence maps to status: strong → **occupied**, weak-but-present
    → **unknown**, none → **free**. Stale/offline cameras and very dark frames
    force **unknown**.
@@ -139,8 +163,10 @@ backend/
     annotate.py      overlay drawing for the live stream
 frontend/            vanilla JS SPA (dashboard, calibration editor, road view)
 scripts/
-  make_demo_video.py synthetic test footage generator
-  smoke_test.py      end-to-end API test
+  make_demo_video.py         synthetic test footage generator
+  smoke_test.py               end-to-end API test
+  test_occupancy_logic.py     zone/vehicle geometry unit tests
+  check_detection_quality.py  measure real detector accuracy on your footage
 ```
 
 ## API overview
