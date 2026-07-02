@@ -8,6 +8,7 @@
 """
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -34,12 +35,30 @@ class BaseDetector:
         raise NotImplementedError
 
 
+# Below this, a downloaded .pt weights file is almost certainly a truncated
+# or otherwise corrupted partial download, not a real model -- the smallest
+# real YOLOv8 checkpoint (nano) is several MB. Loading a corrupted file
+# doesn't raise an error; it silently produces a "model" that finds nothing
+# in any image, which looks identical to "no cars in frame" with no signal
+# that anything is wrong.
+MIN_SANE_WEIGHTS_BYTES = 1_000_000
+
+
 class YoloDetector(BaseDetector):
     name = "yolo"
 
     def __init__(self, model_path: str = None):
         from ultralytics import YOLO  # deferred: optional heavy dependency
         self.model = YOLO(model_path or config.YOLO_MODEL)
+        ckpt_path = getattr(self.model, "ckpt_path", None)
+        if ckpt_path:
+            size = Path(ckpt_path).stat().st_size
+            if size < MIN_SANE_WEIGHTS_BYTES:
+                raise RuntimeError(
+                    f"YOLO weights file {ckpt_path} is only {size} bytes -- almost certainly "
+                    f"a corrupted/truncated download, not a real model. Delete it and let it "
+                    f"re-download: rm {ckpt_path}"
+                )
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         results = self.model.predict(frame, verbose=False, conf=config.CONF_UNKNOWN)

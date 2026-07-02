@@ -121,7 +121,7 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 |---|---|---|
 | `PARKINGGO_ADMIN_USERNAME` / `PARKINGGO_ADMIN_PASSWORD` | `admin` / `admin` | Dashboard login |
 | `PARKINGGO_DETECTOR` | `auto` | `auto` (YOLO if installed, else mock), `yolo`, or `mock` |
-| `PARKINGGO_YOLO_MODEL` | `yolov8s.pt` | Any ultralytics model (`yolov8m.pt`/`yolov8l.pt` are more accurate, slower) |
+| `PARKINGGO_YOLO_MODEL` | `yolov8n.pt` | Any ultralytics model (`yolov8s.pt`/`yolov8m.pt` are more accurate, slower — verify with `check_detection_quality.py` before trusting a switch, since a corrupted download of a larger model fails silently) |
 | `PARKINGGO_DETECT_INTERVAL` | `1.0` | Seconds between detection runs per camera |
 | `PARKINGGO_OVERLAP_THRESHOLD` | `0.6` | Fallback-only: box/zone overlap ratio that counts as occupied when the box's center falls outside every zone (e.g. clipped at the frame edge) |
 | `PARKINGGO_CONF_OCCUPIED` / `PARKINGGO_CONF_UNKNOWN` | `0.45` / `0.25` | Confidence bands: above → occupied, between → unknown |
