@@ -132,8 +132,22 @@ class MockDetector(BaseDetector):
         return detections
 
 
+class NoneDetector(BaseDetector):
+    """No whole-frame detection at all — occupancy comes purely from the
+    per-zone classifier (backend/vision/zone_classifier.py). The right
+    choice for top-down/aerial cameras, where COCO-trained detectors do not
+    recognize cars and their output is pure noise."""
+    name = "none"
+
+    def detect(self, frame: np.ndarray) -> list[Detection]:
+        return []
+
+
 def create_detector() -> BaseDetector:
     backend = config.DETECTOR_BACKEND
+    if backend == "none":
+        log.info("Detector disabled; using per-zone occupancy classifier only")
+        return NoneDetector()
     if backend in ("auto", "yolo"):
         try:
             detector = YoloDetector()

@@ -86,6 +86,74 @@ def test_frame_edge_clipped_box_falls_back_to_overlap():
     check("heavy overlap fallback still classifies it occupied", result == "occupied")
 
 
+def test_zone_classifier_structure_scoring():
+    """The per-zone classifier must score a car-like textured zone high and
+    flat pavement low — this is what carries top-down/aerial cameras, where
+    COCO detectors don't recognize cars at all."""
+    import cv2
+    import numpy as np
+    from backend.vision.zone_classifier import zone_edge_density
+
+    frame = np.full((400, 800, 3), 150, dtype=np.uint8)  # flat pavement
+    # "car" in the right half, top-down: white body with black windshield,
+    # rear window, sunroof, panel seams and wheels — the high-contrast
+    # internal structure every real car has and flat pavement lacks
+    cv2.rectangle(frame, (450, 80), (720, 320), (230, 228, 225), -1)   # body
+    cv2.rectangle(frame, (480, 110), (560, 290), (25, 25, 30), -1)     # windshield
+    cv2.rectangle(frame, (640, 120), (700, 280), (30, 30, 35), -1)     # rear window
+    cv2.rectangle(frame, (580, 150), (625, 250), (40, 40, 45), -1)     # sunroof
+    for seam_x in (575, 635):                                          # panel seams
+        cv2.line(frame, (seam_x, 85), (seam_x, 315), (60, 60, 60), 3)
+    for hood_x in (455, 465):                                          # hood creases
+        cv2.line(frame, (hood_x, 90), (hood_x, 310), (100, 100, 100), 2)
+    for trim_y in (95, 305):                                           # side trim
+        cv2.line(frame, (455, trim_y), (715, trim_y), (80, 80, 80), 3)
+    cv2.rectangle(frame, (505, 70), (535, 82), (35, 35, 40), -1)       # mirrors
+    cv2.rectangle(frame, (505, 318), (535, 330), (35, 35, 40), -1)
+    for lx in (452, 716):                                              # light clusters
+        for ly in (100, 200, 300):
+            cv2.circle(frame, (lx, ly), 7, (255, 240, 200), -1)
+    for wx, wy in ((470, 90), (700, 90), (470, 310), (700, 310)):      # wheels
+        cv2.circle(frame, (wx, wy), 16, (20, 20, 20), -1)
+    cv2.line(frame, (455, 200), (715, 200), (120, 120, 120), 2)        # roof crease
+    for hx in (595, 615):                                              # door handles
+        for hy in (105, 295):
+            cv2.rectangle(frame, (hx, hy), (hx + 12, hy + 6), (70, 70, 70), -1)
+
+    empty_zone = [[40, 40], [360, 40], [360, 360], [40, 360]]
+    # zone drawn stall-tight around the car, the way real stall markings sit
+    car_zone = [[440, 65], [730, 65], [730, 335], [440, 335]]
+    s_empty = zone_edge_density(frame, empty_zone)
+    s_car = zone_edge_density(frame, car_zone)
+    check("flat pavement zone scores low", s_empty is not None and s_empty < 0.05)
+    check("car-structured zone scores high", s_car is not None and s_car > 0.13)
+
+    tiny_zone = [[0, 0], [10, 0], [10, 10], [0, 10]]
+    check("tiny zone crop is unscoreable (None)", zone_edge_density(frame, tiny_zone) is None)
+    dark = np.full((400, 400, 3), 5, dtype=np.uint8)
+    night_zone = [[50, 50], [350, 50], [350, 350], [50, 350]]
+    check("near-black zone is unscoreable (None)", zone_edge_density(dark, night_zone) is None)
+
+
+def test_combine_statuses():
+    from backend import config
+    from backend.vision.zone_classifier import combine_statuses
+
+    occ, free = config.ZONE_EDGE_OCCUPIED, config.ZONE_EDGE_FREE
+    check("detector occupied wins regardless of zone score",
+          combine_statuses("occupied", 0.01) == "occupied")
+    check("high zone score alone -> occupied (aerial case, detector blind)",
+          combine_statuses("free", occ + 0.05) == "occupied")
+    check("low zone score + detector free -> free",
+          combine_statuses("free", free - 0.05) == "free")
+    check("ambiguous zone score -> unknown, not a guess",
+          combine_statuses("free", (occ + free) / 2) == "unknown")
+    check("unscoreable zone falls back to detector verdict",
+          combine_statuses("free", None) == "free")
+    check("detector unknown is not overridden to free by a low score",
+          combine_statuses("unknown", free - 0.05) == "unknown")
+
+
 def main() -> None:
     print("Dense-lot adjacent-zone bleed (the real-world bug this fixes)")
     test_dense_lot_adjacent_zone_bleed()
@@ -94,6 +162,9 @@ def main() -> None:
     test_empty_zone_no_detections()
     test_low_confidence_detection_is_unknown()
     test_frame_edge_clipped_box_falls_back_to_overlap()
+    print("Per-zone occupancy classifier (aerial/top-down support)")
+    test_zone_classifier_structure_scoring()
+    test_combine_statuses()
 
     print(f"\n{checks['passed']} passed, {checks['failed']} failed")
     sys.exit(1 if checks["failed"] else 0)

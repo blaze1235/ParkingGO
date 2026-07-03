@@ -28,8 +28,8 @@ app, no public users, no license plate recognition.
 |---|---|
 | Camera input | RTSP / IP camera URLs, local webcam, or an uploaded test video, with live MJPEG preview |
 | Zone calibration | Draw rectangles or free polygons over the camera snapshot; name, re-side, rename, delete; zones saved per camera |
-| Car detection | YOLOv8 vehicle detection (car/truck/bus/motorcycle), no plate recognition; mock detector fallback for testing without ML dependencies |
-| Occupancy | Overlap of detected vehicles with each zone → free / occupied / unknown, with anti-flicker hysteresis |
+| Car detection | Two independent signals: YOLOv8 vehicle detection (side/angled cameras) **plus** a per-zone occupancy classifier that works at any angle — including top-down/aerial views, where COCO detectors don't recognize cars at all. No plate recognition. |
+| Occupancy | Either signal marks a zone occupied → free / occupied / unknown, with anti-flicker hysteresis |
 | Dashboard | Free/occupied/unknown counts, live camera view with colored overlays, and a simplified road illustration view |
 | History | Timestamped status change feed ("Spot 1 became occupied at 14:25") plus hourly daily statistics |
 
@@ -120,12 +120,14 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 | Variable | Default | Meaning |
 |---|---|---|
 | `PARKINGGO_ADMIN_USERNAME` / `PARKINGGO_ADMIN_PASSWORD` | `admin` / `admin` | Dashboard login |
-| `PARKINGGO_DETECTOR` | `auto` | `auto` (YOLO if installed, else mock), `yolo`, or `mock` |
+| `PARKINGGO_DETECTOR` | `auto` | `auto` (YOLO if installed, else mock), `yolo`, `mock`, or `none` (zone classifier only — the right choice for top-down/aerial cameras) |
 | `PARKINGGO_YOLO_MODEL` | `yolov8n.pt` | Any ultralytics model (`yolov8s.pt`/`yolov8m.pt` are more accurate, slower — verify with `check_detection_quality.py` before trusting a switch, since a corrupted download of a larger model fails silently) |
 | `PARKINGGO_DETECT_INTERVAL` | `1.0` | Seconds between detection runs per camera |
 | `PARKINGGO_OVERLAP_THRESHOLD` | `0.6` | Fallback-only: box/zone overlap ratio that counts as occupied when the box's center falls outside every zone (e.g. clipped at the frame edge) |
 | `PARKINGGO_CONF_OCCUPIED` / `PARKINGGO_CONF_UNKNOWN` | `0.45` / `0.25` | Confidence bands: above → occupied, between → unknown |
 | `PARKINGGO_MIN_BRIGHTNESS` | `25` | Mean frame brightness (0–255) below which zones go unknown |
+| `PARKINGGO_ZONE_CLASSIFIER` | `1` | Per-zone occupancy classifier on/off (`0` to rely on the detector alone) |
+| `PARKINGGO_ZONE_EDGE_OCCUPIED` / `PARKINGGO_ZONE_EDGE_FREE` | `0.13` / `0.11` | Zone structure-score bands: at/above → occupied, below free → free, between → unknown |
 | `PARKINGGO_STABLE_TICKS` | `3` | Consecutive identical readings required before a status commits |
 | `PARKINGGO_SAMPLE_INTERVAL` | `60` | Seconds between occupancy samples stored for daily stats |
 | `PARKINGGO_DATA_DIR` | `./data` | SQLite database + uploaded videos |
@@ -134,17 +136,30 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 
 1. Each camera runs a capture thread (only the newest frame is kept, so RTSP
    never lags) and a detection thread on a fixed interval.
-2. A vehicle counts as "in" a zone primarily when its detection box's center
-   point falls inside the zone polygon — robust in dense lots, where a
-   neighboring car's box (especially one widened by a cast shadow) can
-   overlap the next stall without its center ever leaving its own stall.
-   Heavy area overlap (Sutherland–Hodgman polygon clipping) is used only as
-   a fallback for boxes clipped at the frame edge.
-3. Detection confidence maps to status: strong → **occupied**, weak-but-present
-   → **unknown**, none → **free**. Stale/offline cameras and very dark frames
-   force **unknown**.
-4. A status must repeat for `STABLE_TICKS` consecutive runs before it commits,
+2. **Signal 1 — vehicle detector (YOLO)**: a vehicle counts as "in" a zone
+   primarily when its detection box's center point falls inside the zone
+   polygon — robust in dense lots, where a neighboring car's box (especially
+   one widened by a cast shadow) can overlap the next stall without its
+   center ever leaving its own stall. Heavy area overlap (Sutherland–Hodgman
+   polygon clipping) is used only as a fallback for boxes clipped at the
+   frame edge. This signal carries side/angled cameras — the views COCO
+   models are trained on.
+3. **Signal 2 — per-zone occupancy classifier**: each zone's own pixels are
+   scored for car-like internal structure (edge density on scale-normalized
+   crops). This is what carries **top-down/aerial cameras**: COCO-trained
+   detectors (YOLO included) do not recognize cars viewed straight from
+   above — verified on real footage, where both YOLOv8 and EfficientDet see
+   nadir-view cars as "cell phones" or nothing. The classifier was
+   calibrated and verified on real 1080p aerial parking footage (23 stalls
+   hand-checked across the whole clip, 100% correct). Reliable from ~720p
+   up; tiny or near-black zones read "unknown" rather than guessing.
+4. Either signal marks the zone **occupied**; ambiguous zone scores or
+   weak-confidence detections read **unknown**; **free** requires the zone
+   to actually look empty. Stale/offline cameras and very dark frames force
+   **unknown**.
+5. A status must repeat for `STABLE_TICKS` consecutive runs before it commits,
    which suppresses flicker; every committed change is written to history.
+   A looping test video resets this smoothing at the loop point.
 
 ## Project layout
 
@@ -160,6 +175,7 @@ backend/
     worker.py        per-camera capture/detect threads, hysteresis
     manager.py       worker lifecycle + stats sampler
     geometry.py      polygon clipping / overlap math
+    zone_classifier.py  angle-independent per-zone occupancy scoring
     annotate.py      overlay drawing for the live stream
 frontend/            vanilla JS SPA (dashboard, calibration editor, road view)
 scripts/

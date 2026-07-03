@@ -17,6 +17,7 @@ from .. import config, db
 from .annotate import annotate_frame
 from .detector import BaseDetector
 from .geometry import box_center_in_zone, box_zone_overlap_ratio
+from .zone_classifier import combine_statuses, zone_edge_density
 
 log = logging.getLogger("parkinggo.worker")
 
@@ -30,8 +31,14 @@ class ZoneState:
         self._pending_ticks = 0
         self._committed_once = False
 
-    def observe(self, status: str, camera_id: int) -> None:
-        """Apply hysteresis; commit + record history when stable."""
+    def observe(self, status: str, camera_id: int, immediate: bool = False) -> None:
+        """Apply hysteresis; commit + record history when stable.
+
+        immediate=True bypasses hysteresis for this observation — used right
+        after a scene cut (a looping test video restarting), where the world
+        legitimately changed in one frame and smoothing would just show
+        several seconds of stale statuses.
+        """
         if status == self.status:
             self._pending = None
             self._pending_ticks = 0
@@ -41,7 +48,8 @@ class ZoneState:
             self._pending_ticks = 1
         else:
             self._pending_ticks += 1
-        if self._pending_ticks >= config.STATUS_STABLE_TICKS or not self._committed_once:
+        if (immediate or self._pending_ticks >= config.STATUS_STABLE_TICKS
+                or not self._committed_once):
             self.status = status
             self.since = time.time()
             self._pending = None
@@ -64,6 +72,7 @@ class CameraWorker:
         self.error: Optional[str] = None
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._scene_cut = False  # set when a looping file restarts
         self.reload_zones()
 
     # ------------------------------------------------------------ lifecycle
@@ -127,6 +136,7 @@ class CameraWorker:
                 if not ok:
                     if is_file:  # loop test videos forever
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        self._scene_cut = True  # statuses re-evaluate immediately
                         continue
                     log.warning("[cam %s] stream read failed; reconnecting", self.camera["id"])
                     break
@@ -171,23 +181,33 @@ class CameraWorker:
                 log.exception("[cam %s] detection failed", self.camera["id"])
                 too_dark = True  # treat as unreliable -> unknown
 
+        immediate = self._scene_cut
+        self._scene_cut = False
         with self.lock:
             self.last_detections = detections
             for state in self.zone_states.values():
                 if too_dark:
                     state.observe("unknown", self.camera["id"])
                     continue
-                state.observe(self._classify_zone(state.zone, detections), self.camera["id"])
+                state.observe(self._classify_zone(state.zone, detections, frame),
+                              self.camera["id"], immediate=immediate)
 
     @staticmethod
-    def _classify_zone(zone: dict, detections: list) -> str:
-        """A vehicle counts as "in" a zone if its detection box center falls
-        inside the zone polygon, or (fallback, for boxes clipped at the
-        frame edge) if it has very heavy area overlap. Center-in-zone is the
-        primary signal because in a dense lot a neighboring car's box often
-        spills 25%+ into the next stall over — especially with a cast shadow
-        widening the box on one side — which used to falsely mark the empty
-        neighboring zone as occupied.
+    def _classify_zone(zone: dict, detections: list, frame=None) -> str:
+        """Two independent signals, merged by combine_statuses():
+
+        1. Whole-frame detector (YOLO): a vehicle counts as "in" a zone if
+           its detection box center falls inside the zone polygon, or
+           (fallback, for boxes clipped at the frame edge) if it has very
+           heavy area overlap. Center-in-zone is the primary criterion
+           because in a dense lot a neighboring car's box often spills 25%+
+           into the next stall over — especially with a cast shadow widening
+           the box on one side — which used to falsely mark the empty
+           neighboring zone as occupied. This signal carries side/angled
+           cameras, the views the detector was trained on.
+        2. Per-zone structure score: carries top-down/aerial cameras, where
+           COCO detectors do not recognize cars at all (verified on real
+           footage — see zone_classifier.py).
         """
         best_conf = 0.0
         for det in detections:
@@ -198,10 +218,16 @@ class CameraWorker:
             if in_zone:
                 best_conf = max(best_conf, det.confidence)
         if best_conf >= config.CONF_OCCUPIED:
-            return "occupied"
-        if best_conf >= config.CONF_UNKNOWN:
-            return "unknown"  # something car-ish but low confidence
-        return "free"
+            detector_status = "occupied"
+        elif best_conf >= config.CONF_UNKNOWN:
+            detector_status = "unknown"  # something car-ish but low confidence
+        else:
+            detector_status = "free"
+
+        if not config.ZONE_CLASSIFIER_ENABLED or frame is None:
+            return detector_status
+        score = zone_edge_density(frame, zone["polygon"])
+        return combine_statuses(detector_status, score)
 
     # -------------------------------------------------------------- outputs
 

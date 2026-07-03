@@ -13,7 +13,8 @@ ADMIN_USERNAME = os.environ.get("PARKINGGO_ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("PARKINGGO_ADMIN_PASSWORD", "admin")
 SESSION_TTL_SECONDS = int(os.environ.get("PARKINGGO_SESSION_TTL", 12 * 3600))
 
-# Detection backend: "auto" (YOLO if installed, else mock), "yolo", "mock"
+# Detection backend: "auto" (YOLO if installed, else mock), "yolo", "mock",
+# or "none" (rely purely on the per-zone occupancy classifier below).
 DETECTOR_BACKEND = os.environ.get("PARKINGGO_DETECTOR", "auto").lower()
 # yolov8n (nano): the safest default. A larger model (yolov8s/m/l) is more
 # accurate, but a mid-download failure or corrupted weights file for one of
@@ -51,6 +52,20 @@ FRAME_STALE_SECONDS = float(os.environ.get("PARKINGGO_FRAME_STALE", 10))
 # A zone status must be observed this many consecutive detection ticks
 # before it is committed (anti-flicker hysteresis).
 STATUS_STABLE_TICKS = int(os.environ.get("PARKINGGO_STABLE_TICKS", 3))
+
+# Per-zone occupancy classifier (backend/vision/zone_classifier.py): scores
+# each zone's own pixels for car-like internal structure, independent of
+# camera angle. This is what carries top-down/aerial cameras, where COCO
+# detectors (YOLO included) do not recognize cars at all. Thresholds are
+# edge-density values calibrated on real 1080p aerial footage across two
+# frames and 23 hand-verified stalls: occupied stalls measured 0.137-0.282
+# (the 0.137 was a dark car deep in building shade), empty stalls 0.006-
+# 0.104 (the 0.104 had a hard pole-shadow line across it). Scores between
+# FREE and OCCUPIED read as "unknown". Reliable from ~720p up; at very low
+# resolutions (zone crops under ~24 px) zones read "unknown" instead.
+ZONE_CLASSIFIER_ENABLED = os.environ.get("PARKINGGO_ZONE_CLASSIFIER", "1") not in ("0", "false", "no")
+ZONE_EDGE_OCCUPIED = float(os.environ.get("PARKINGGO_ZONE_EDGE_OCCUPIED", 0.13))
+ZONE_EDGE_FREE = float(os.environ.get("PARKINGGO_ZONE_EDGE_FREE", 0.11))
 
 # Occupancy counts are sampled into history at this interval (seconds).
 SAMPLE_INTERVAL = float(os.environ.get("PARKINGGO_SAMPLE_INTERVAL", 60))

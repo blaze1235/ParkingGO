@@ -135,8 +135,12 @@ def main() -> None:
             print(f"  {low_conf}/{len(arr)} detections below 0.50 confidence "
                   f"-- borderline calls worth a closer look in the output video")
     else:
-        print("No detections at all across sampled frames -- if the footage has cars in it,"
-              " that's a real problem worth investigating.")
+        print("No detections across sampled frames. For TOP-DOWN/AERIAL footage this is")
+        print("EXPECTED: COCO-trained detectors (YOLO included) don't recognize cars viewed")
+        print("straight from above. ParkingGo handles that case with its per-zone occupancy")
+        print("classifier instead (enabled by default) -- draw your zones in the app and the")
+        print("dashboard will classify them from each zone's own pixels. For side/angled")
+        print("cameras, zero detections on footage that clearly has cars WOULD be a problem.")
     if counts:
         counts_arr = np.array(counts)
         print(f"Detections per frame: min={counts_arr.min()} "
