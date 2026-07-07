@@ -38,6 +38,7 @@ function countChips(s) {
 const routes = [
   { re: /^#\/login$/, fn: renderLogin, public: true },
   { re: /^#\/?$/, fn: renderDashboard, nav: 'dashboard' },
+  { re: /^#\/monitor$/, fn: renderMonitor, nav: 'monitor' },
   { re: /^#\/cameras$/, fn: renderCameras, nav: 'cameras' },
   { re: /^#\/camera\/(\d+)$/, fn: renderCameraDetail },
   { re: /^#\/camera\/(\d+)\/calibrate$/, fn: renderCalibrate },
@@ -148,10 +149,12 @@ async function renderDashboard() {
     }
     grid.innerHTML = statuses.map(s => `
       <div class="card camera-card">
-        <div class="row spread">
-          <h2>${esc(s.camera_name)}</h2>
-          <span class="conn ${s.connected ? 'on' : 'off'}">${s.connected ? '● live' : '○ offline'}</span>
+        <div class="cam-thumb-wrap">
+          <img class="cam-thumb" src="${API.snapshotUrl(s.camera_id, true, 'low')}" loading="lazy"
+               alt="${esc(s.camera_name)} latest snapshot">
+          <span class="cam-thumb-badge ${s.connected ? 'on' : 'off'}">${s.connected ? '● LIVE' : '○ OFFLINE'}</span>
         </div>
+        <h2>${esc(s.camera_name)}</h2>
         <div class="counts">${countChips(s)}</div>
         <div class="row">
           <a class="btn btn-sm" href="#/camera/${s.camera_id}">Open</a>
@@ -159,6 +162,74 @@ async function renderDashboard() {
         </div>
       </div>`).join('');
   });
+}
+
+/* ------------------------------------------------------------------ monitor */
+
+async function renderMonitor() {
+  view.innerHTML = `
+    <div class="row spread">
+      <div>
+        <h1>Monitor</h1>
+        <p class="subtitle" style="margin:0">All live camera feeds at a glance</p>
+      </div>
+      <label class="field" style="width:160px">Quality
+        <select id="mon-quality">
+          <option value="low" selected>Low (fast)</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </label>
+    </div>
+    <div class="monitor-grid" id="monitor-grid"></div>`;
+
+  const grid = document.getElementById('monitor-grid');
+
+  async function draw() {
+    const quality = document.getElementById('mon-quality').value;
+    let cams;
+    try { cams = await API.get('/api/cameras'); } catch (_) { return; }
+    const enabled = cams.filter(c => c.enabled);
+    grid.innerHTML = enabled.length ? enabled.map(c => `
+      <div class="card monitor-tile">
+        <div class="row spread" style="margin-bottom:8px">
+          <strong>${esc(c.name)}</strong>
+          <span class="conn ${c.connected ? 'on' : 'off'}" data-badge="${c.id}">${c.connected ? '● live' : '○ offline'}</span>
+        </div>
+        <div class="monitor-tile-media">
+          <img data-cam="${c.id}" src="${API.streamUrl(c.id, true, quality)}" alt="${esc(c.name)} live stream">
+          <button class="btn btn-sm monitor-fullscreen" data-fs="${c.id}" type="button"
+                  title="Fullscreen" aria-label="View ${esc(c.name)} fullscreen">⛶</button>
+        </div>
+        <a class="btn btn-sm" href="#/camera/${c.id}" style="margin-top:8px">Open details</a>
+      </div>`).join('')
+      : '<div class="card"><h2>No enabled cameras</h2><p class="subtitle">Add or enable a camera to see it here.</p></div>';
+
+    grid.querySelectorAll('[data-fs]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        const img = grid.querySelector(`img[data-cam="${btn.dataset.fs}"]`);
+        if (img && img.requestFullscreen) img.requestFullscreen();
+      }));
+  }
+
+  async function refreshBadges() {
+    let statuses;
+    try { statuses = await API.get('/api/status'); } catch (_) { return; }
+    statuses.forEach(s => {
+      const badge = grid.querySelector(`[data-badge="${s.camera_id}"]`);
+      if (!badge) return;
+      badge.textContent = s.connected ? '● live' : '○ offline';
+      badge.className = `conn ${s.connected ? 'on' : 'off'}`;
+    });
+  }
+
+  document.getElementById('mon-quality').addEventListener('change', draw);
+  await draw();
+  // Streams are persistent MJPEG connections, not polled snapshots -- only
+  // the lightweight status badges refresh on a timer; redrawing the <img>
+  // tags themselves would tear down and reopen every stream on the page.
+  every(4000, refreshBadges);
+  cleanup.push(() => grid.querySelectorAll('img[data-cam]').forEach(img => { img.src = ''; }));
 }
 
 /* ----------------------------------------------------------------- cameras */
@@ -237,18 +308,25 @@ async function renderCameras() {
     btn.textContent = 'Add camera';
   });
 
+  let editingId = null;   // camera id whose source is mid-edit; paused polling avoids clobbering the form
+  let lastCams = [];
+
   async function refreshRows() {
+    if (editingId !== null) return;
     const cams = await API.get('/api/cameras');
     const rows = document.getElementById('cam-rows');
+    if (!rows) return;   // navigated away from #/cameras while the request was in flight
+    lastCams = cams;
     rows.innerHTML = cams.length ? cams.map(c => `
       <tr>
         <td><a href="#/camera/${c.id}">${esc(c.name)}</a></td>
-        <td class="calib-help">${esc(c.source_type)}: ${esc(String(c.source).slice(0, 60))}</td>
+        <td class="calib-help" data-source-cell="${c.id}">${esc(c.source_type)}: ${esc(String(c.source).slice(0, 60))}</td>
         <td><span class="conn ${c.connected ? 'on' : 'off'}">${
           c.enabled ? (c.connected ? '● live' : '○ connecting / offline') : '⏸ disabled'}</span>
           ${c.runtime_error ? `<div class="error-text">${esc(c.runtime_error)}</div>` : ''}</td>
         <td class="row" style="justify-content:flex-end">
           <a class="btn btn-sm" href="#/camera/${c.id}/calibrate">Zones</a>
+          ${c.source_type !== 'file' ? `<button class="btn btn-sm" data-edit="${c.id}">Edit source</button>` : ''}
           <button class="btn btn-sm" data-toggle="${c.id}" data-enabled="${c.enabled}">${c.enabled ? 'Disable' : 'Enable'}</button>
           <button class="btn btn-sm btn-danger" data-del="${c.id}" data-name="${esc(c.name)}">Delete</button>
         </td>
@@ -267,7 +345,51 @@ async function renderCameras() {
         toast('Camera deleted');
         refreshRows();
       }));
+    rows.querySelectorAll('[data-edit]').forEach(btn =>
+      btn.addEventListener('click', () => openSourceEditor(Number(btn.dataset.edit))));
   }
+
+  function openSourceEditor(id) {
+    const cam = lastCams.find(c => c.id === id);
+    const cell = document.querySelector(`[data-source-cell="${id}"]`);
+    if (!cam || !cell) return;
+    editingId = id;
+    cell.innerHTML = `
+      <form class="row" id="src-edit-form" style="gap:6px;flex-wrap:nowrap">
+        <select id="src-edit-type" style="width:auto">
+          <option value="url" ${cam.source_type === 'url' ? 'selected' : ''}>RTSP / IP URL</option>
+          <option value="webcam" ${cam.source_type === 'webcam' ? 'selected' : ''}>Local webcam</option>
+        </select>
+        <input id="src-edit-value" placeholder="Leave blank to keep current" style="min-width:200px">
+        <button class="btn btn-sm btn-primary" type="submit">Save</button>
+        <button class="btn btn-sm btn-ghost" type="button" id="src-edit-cancel">Cancel</button>
+      </form>
+      <div class="error-text" id="src-edit-error"></div>`;
+
+    document.getElementById('src-edit-cancel').addEventListener('click', () => {
+      editingId = null;
+      refreshRows();
+    });
+    document.getElementById('src-edit-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const errEl = document.getElementById('src-edit-error');
+      const type = document.getElementById('src-edit-type').value;
+      const value = document.getElementById('src-edit-value').value.trim();
+      if (type !== cam.source_type && !value) {
+        errEl.textContent = 'Enter a new source value when changing the source type';
+        return;
+      }
+      const body = { source_type: type };
+      if (value) body.source = value;
+      try {
+        await API.patch(`/api/cameras/${id}`, body);
+        toast('Camera source updated');
+        editingId = null;
+        refreshRows();
+      } catch (err) { errEl.textContent = err.message; }
+    });
+  }
+
   await refreshRows();
   every(5000, refreshRows);
 }
@@ -318,18 +440,40 @@ async function renderCameraDetail(idStr) {
     if (tab === 'live') {
       el.innerHTML = `
         <div class="card stream-box">
-          <div class="row spread" style="margin-bottom:10px">
+          <div class="row spread" style="margin-bottom:10px;flex-wrap:wrap">
             <span class="calib-help">Live stream with detection overlays</span>
-            <label class="row" style="gap:6px;font-size:13px;color:var(--text-2)">
-              <input type="checkbox" id="overlay-toggle" checked> overlays
-            </label>
+            <div class="row" style="gap:14px">
+              <label class="row" style="gap:6px;font-size:13px;color:var(--text-2)">
+                <input type="checkbox" id="overlay-toggle" checked> overlays
+              </label>
+              <label class="row" style="gap:6px;font-size:13px;color:var(--text-2)">
+                quality
+                <select id="quality-select">
+                  <option value="high" selected>High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <button class="btn btn-sm" id="fullscreen-btn" type="button" aria-label="View stream fullscreen">Fullscreen</button>
+              <a class="btn btn-sm" id="snapshot-link" download="camera-${cameraId}-snapshot.jpg" aria-label="Download current snapshot">Download snapshot</a>
+            </div>
           </div>
-          <img id="live-img" src="${API.streamUrl(cameraId, true)}" alt="Live camera stream">
+          <img id="live-img" src="${API.streamUrl(cameraId, true, 'high')}" alt="Live camera stream">
         </div>`;
-      document.getElementById('overlay-toggle').addEventListener('change', e => {
-        document.getElementById('live-img').src = API.streamUrl(cameraId, e.target.checked);
+
+      const img = document.getElementById('live-img');
+      const overlayEl = document.getElementById('overlay-toggle');
+      const qualityEl = document.getElementById('quality-select');
+      const updateSrc = () => { img.src = API.streamUrl(cameraId, overlayEl.checked, qualityEl.value); };
+      overlayEl.addEventListener('change', updateSrc);
+      qualityEl.addEventListener('change', updateSrc);
+      document.getElementById('fullscreen-btn').addEventListener('click', () => {
+        if (img.requestFullscreen) img.requestFullscreen();
       });
-      cleanup.push(() => { const img = document.getElementById('live-img'); if (img) img.src = ''; });
+      document.getElementById('snapshot-link').addEventListener('click', e => {
+        e.currentTarget.href = API.snapshotUrl(cameraId, overlayEl.checked, 'high');
+      });
+      cleanup.push(() => { if (img) img.src = ''; });
     } else if (tab === 'road') {
       el.innerHTML = `
         <div class="card">

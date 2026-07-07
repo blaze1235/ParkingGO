@@ -6,6 +6,7 @@ vehicle detector every DETECT_INTERVAL seconds, converts detections into
 per-zone statuses with hysteresis, and records committed changes to history.
 """
 import logging
+import os
 import threading
 import time
 from typing import Optional
@@ -105,6 +106,11 @@ class CameraWorker:
         source = self.camera["source"]
         if self.camera["source_type"] == "webcam":
             cap = cv2.VideoCapture(int(source))
+        elif source.startswith("rtsp://"):
+            # Read by OpenCV's FFmpeg backend at open() time, so setting it
+            # right before this call (rather than once at import) is enough.
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;{config.RTSP_TRANSPORT}"
+            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
         else:
             cap = cv2.VideoCapture(source)
         if not cap.isOpened():

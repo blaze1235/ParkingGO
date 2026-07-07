@@ -49,6 +49,12 @@ CONF_UNKNOWN = float(os.environ.get("PARKINGGO_CONF_UNKNOWN", 0.25))
 MIN_BRIGHTNESS = float(os.environ.get("PARKINGGO_MIN_BRIGHTNESS", 25))
 # A camera with no fresh frame for this long is considered offline.
 FRAME_STALE_SECONDS = float(os.environ.get("PARKINGGO_FRAME_STALE", 10))
+# RTSP transport forced via FFmpeg's OPENCV_FFMPEG_CAPTURE_OPTIONS (see
+# worker.py._open_capture). "tcp" avoids the frame corruption/hangs that
+# UDP (FFmpeg's RTSP default) suffers on real networks -- WiFi, NAT, packet
+# loss; switch to "udp" only if you need the lower latency and your network
+# is solid.
+RTSP_TRANSPORT = os.environ.get("PARKINGGO_RTSP_TRANSPORT", "tcp").lower()
 # A zone status must be observed this many consecutive detection ticks
 # before it is committed (anti-flicker hysteresis).
 STATUS_STABLE_TICKS = int(os.environ.get("PARKINGGO_STABLE_TICKS", 3))

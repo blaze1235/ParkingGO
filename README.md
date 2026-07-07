@@ -26,11 +26,13 @@ app, no public users, no license plate recognition.
 
 | Module | What it does |
 |---|---|
-| Camera input | RTSP / IP camera URLs, local webcam, or an uploaded test video, with live MJPEG preview |
+| Camera input | RTSP / IP camera URLs (forced over TCP for reliability), HTTP/MJPEG URLs, local webcam, or an uploaded test video — auto-reconnects with backoff if a stream drops |
 | Zone calibration | Draw rectangles or free polygons over the camera snapshot; name, re-side, rename, delete; zones saved per camera |
 | Car detection | Two independent signals: YOLOv8 vehicle detection (side/angled cameras) **plus** a per-zone occupancy classifier that works at any angle — including top-down/aerial views, where COCO detectors don't recognize cars at all. No plate recognition. |
 | Occupancy | Either signal marks a zone occupied → free / occupied / unknown, with anti-flicker hysteresis |
-| Dashboard | Free/occupied/unknown counts, live camera view with colored overlays, and a simplified road illustration view |
+| Dashboard | Free/occupied/unknown counts, per-camera live thumbnail with a LIVE/OFFLINE badge, and a simplified road illustration view |
+| Monitor | Dedicated grid page showing every enabled camera's live stream at once, with a low/medium/high quality selector and per-tile fullscreen |
+| Live camera view | Full-size MJPEG stream per camera with overlay toggle, quality selector, fullscreen, and snapshot download; admin can edit a camera's source URL in place |
 | History | Timestamped status change feed ("Spot 1 became occupied at 14:25") plus hourly daily statistics |
 
 ## Quickstart
@@ -126,11 +128,53 @@ Everything is tuned via environment variables (defaults in `backend/config.py`):
 | `PARKINGGO_OVERLAP_THRESHOLD` | `0.6` | Fallback-only: box/zone overlap ratio that counts as occupied when the box's center falls outside every zone (e.g. clipped at the frame edge) |
 | `PARKINGGO_CONF_OCCUPIED` / `PARKINGGO_CONF_UNKNOWN` | `0.45` / `0.25` | Confidence bands: above → occupied, between → unknown |
 | `PARKINGGO_MIN_BRIGHTNESS` | `25` | Mean frame brightness (0–255) below which zones go unknown |
+| `PARKINGGO_RTSP_TRANSPORT` | `tcp` | FFmpeg RTSP transport. TCP avoids the frame corruption/hangs UDP suffers on real networks; set to `udp` only if you need lower latency on a solid network |
 | `PARKINGGO_ZONE_CLASSIFIER` | `1` | Per-zone occupancy classifier on/off (`0` to rely on the detector alone) |
 | `PARKINGGO_ZONE_EDGE_OCCUPIED` / `PARKINGGO_ZONE_EDGE_FREE` | `0.13` / `0.11` | Zone structure-score bands: at/above → occupied, below free → free, between → unknown |
 | `PARKINGGO_STABLE_TICKS` | `3` | Consecutive identical readings required before a status commits |
 | `PARKINGGO_SAMPLE_INTERVAL` | `60` | Seconds between occupancy samples stored for daily stats |
 | `PARKINGGO_DATA_DIR` | `./data` | SQLite database + uploaded videos |
+
+## Live camera streaming
+
+**Ingestion.** A camera's `source` can be any URL OpenCV's FFmpeg backend can
+open — `rtsp://`, `http://` MJPEG, etc. — a local webcam index, or an
+uploaded file. RTSP specifically is forced over **TCP** transport by default
+(`PARKINGGO_RTSP_TRANSPORT`), because FFmpeg's default UDP transport drops
+and corrupts frames on real networks (WiFi, NAT, packet loss). If a stream
+drops, the capture thread reconnects automatically with exponential backoff
+(1s → 30s cap) — no restart needed.
+
+**Delivery to the browser** is plain MJPEG (`multipart/x-mixed-replace`),
+served from `GET /api/cameras/{id}/stream` and rendered with a plain
+`<img>` tag. This was a deliberate choice over HLS/WebRTC: it needs no
+extra infrastructure (no RTSPtoWeb/go2rtc/ffmpeg-to-HLS process to run
+and keep alive), works in every browser with zero client-side JS library,
+and is low-latency enough for an operator dashboard watching a handful of
+cameras. Both `/stream` and `/snapshot` take `quality=high|medium|low`
+(scale + JPEG quality trade-off) — the **Monitor** page (`#/monitor`, all
+enabled cameras in a grid) defaults to `low` so N simultaneous tiles don't
+each demand full-resolution bandwidth; the per-camera **Live camera** tab
+defaults to `high`.
+
+**Credentials never reach the frontend.** A camera's `source` commonly
+embeds `user:pass@` for RTSP auth. Every API response masks this
+(`rtsp://***:***@host:554/path`) before it leaves the backend — the real
+value only ever lives in the database and inside the capture worker. The
+Cameras page's "Edit source" control never round-trips the masked display
+value either: its input starts blank ("leave blank to keep current"), and
+the backend rejects any update that contains the masked placeholder, so a
+UI bug can't accidentally overwrite real credentials with `***`.
+
+**What's intentionally not built:**
+- *A public city-CCTV directory.* There's no honest public data source to
+  wire up here without fabricating one — any camera (private or public) is
+  added the same way, by pasting its URL into the Cameras page.
+- *Motion-detection-based alarms.* The per-zone occupancy classifier
+  already gives a purpose-built, more accurate occupied/free signal per
+  spot than generic frame-differencing motion detection would, and every
+  committed status change is already recorded in the History tab — adding
+  a second, cruder detection path on top would be redundant.
 
 ## How occupancy is decided
 
@@ -192,13 +236,13 @@ All endpoints require `Authorization: Bearer <token>` from `POST /api/auth/login
 
 ```
 POST   /api/auth/login                     {username, password} → {token}
-GET    /api/cameras                        list (+ live connection state)
+GET    /api/cameras                        list (+ live connection state; source credentials masked)
 POST   /api/cameras                        {name, source_type, source}
 POST   /api/cameras/upload                 multipart: name + video file
 PATCH  /api/cameras/{id}                   rename / change source / enable
 DELETE /api/cameras/{id}
-GET    /api/cameras/{id}/snapshot?overlay=1
-GET    /api/cameras/{id}/stream?overlay=1  MJPEG live stream
+GET    /api/cameras/{id}/snapshot?overlay=1&quality=high|medium|low
+GET    /api/cameras/{id}/stream?overlay=1&quality=high|medium|low   MJPEG live stream
 GET    /api/cameras/{id}/zones             POST to create
 PATCH  /api/zones/{id}                     DELETE to remove
 GET    /api/status                         occupancy summary, all cameras

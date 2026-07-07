@@ -32,10 +32,10 @@ const API = {
   del(path) { return this.request('DELETE', path); },
 
   /* image/stream URLs need the token as a query param (<img> can't set headers) */
-  streamUrl(cameraId, overlay = true) {
-    return `/api/cameras/${cameraId}/stream?overlay=${overlay ? 1 : 0}&token=${this.token()}`;
+  streamUrl(cameraId, overlay = true, quality = 'high') {
+    return `/api/cameras/${cameraId}/stream?overlay=${overlay ? 1 : 0}&quality=${quality}&token=${this.token()}`;
   },
-  snapshotUrl(cameraId, overlay = false) {
-    return `/api/cameras/${cameraId}/snapshot?overlay=${overlay ? 1 : 0}&token=${this.token()}&_=${Date.now()}`;
+  snapshotUrl(cameraId, overlay = false, quality = 'high') {
+    return `/api/cameras/${cameraId}/snapshot?overlay=${overlay ? 1 : 0}&quality=${quality}&token=${this.token()}&_=${Date.now()}`;
   },
 };

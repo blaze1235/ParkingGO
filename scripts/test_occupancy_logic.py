@@ -154,6 +154,33 @@ def test_combine_statuses():
           combine_statuses("unknown", free - 0.05) == "unknown")
 
 
+def test_redact_source():
+    """RTSP/IP camera URLs may carry credentials (rtsp://user:pass@host/..);
+    these must never reach the frontend. Only source_type == "url" entries
+    with embedded userinfo get masked -- file paths, webcam device indices,
+    and credential-free URLs pass through unchanged."""
+    from backend.api.routes_cameras import redact_source
+
+    check("rtsp with credentials -> host/path kept, credentials masked",
+          redact_source("url", "rtsp://admin:s3cret@192.168.1.10:554/stream1")
+          == "rtsp://***:***@192.168.1.10:554/stream1")
+    check("http with credentials -> masked too",
+          redact_source("url", "http://user:pw@cam.example.com/video")
+          == "http://***:***@cam.example.com/video")
+    check("url with no credentials -> unchanged",
+          redact_source("url", "rtsp://192.168.1.10:554/stream1")
+          == "rtsp://192.168.1.10:554/stream1")
+    check("file path source -> untouched (not a url source_type)",
+          redact_source("file", "/data/uploads/upload_123.mp4")
+          == "/data/uploads/upload_123.mp4")
+    check("webcam device index -> untouched",
+          redact_source("webcam", "0") == "0")
+    check("no '://' at all -> untouched (short-circuits before parsing)",
+          redact_source("url", "not a url at all") == "not a url at all")
+    check("unparseable url (urlsplit raises ValueError) -> falls back to original",
+          redact_source("url", "rtsp://[::1/broken") == "rtsp://[::1/broken")
+
+
 def main() -> None:
     print("Dense-lot adjacent-zone bleed (the real-world bug this fixes)")
     test_dense_lot_adjacent_zone_bleed()
@@ -165,6 +192,8 @@ def main() -> None:
     print("Per-zone occupancy classifier (aerial/top-down support)")
     test_zone_classifier_structure_scoring()
     test_combine_statuses()
+    print("Camera source credential redaction")
+    test_redact_source()
 
     print(f"\n{checks['passed']} passed, {checks['failed']} failed")
     sys.exit(1 if checks["failed"] else 0)
